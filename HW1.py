@@ -1,17 +1,3 @@
-#!/usr/bin/env python3
-# top100_github_authors.py
-"""
-Собирает топ-100 авторов (по email) по количеству коммитов в репозиториях организации GitHub.
-Игнорирует merge-коммиты (сообщения, начинающиеся с "Merge pull request #").
-
-Запуск:
-    export GITHUB_TOKEN="ghp_..."   # или задайте в WINDOWS через set
-    python top100_github_authors.py --org netflix --out top100.csv
-
-Примечания:
-- Использует только requests (не использует официальные клиенты GitHub).
-- Параметр --max-repos можно использовать чтобы ограничить число репозиториев (для тестов).
-"""
 import os
 import sys
 import time
@@ -50,7 +36,6 @@ def wait_if_needed(rate):
             wait = max(0, reset_ts - int(time.time()) + 2)
             print(f"[RATE] Осталось {rate['remaining']} запросов; жду {wait}s до сброса...")
             time.sleep(wait)
-    # otherwise continue
 
 def iter_pages(session, url, params=None):
     page = 1
@@ -60,24 +45,20 @@ def iter_pages(session, url, params=None):
         params["page"] = page
         resp = session.get(url, params=params)
         if resp.status_code == 202:
-            # sometimes GitHub returns 202 if it's preparing data; retry shortly
             print(f"[INFO] 202 Accepted for {url} page {page}. retrying after 1s...")
             time.sleep(1)
             continue
         if resp.status_code == 409:
-            # empty repository (e.g., no commits)
             return
         if resp.status_code != 200:
             print(f"[ERROR] HTTP {resp.status_code} for {url} page {page}: {resp.text[:200]}", file=sys.stderr)
             return
         data = resp.json()
         if not isinstance(data, list):
-            # sometimes an endpoint returns a dict (error), bail.
             return
         if not data:
             break
         yield from data
-        # pagination: if less than per_page then stop
         if len(data) < params["per_page"]:
             break
         page += 1
@@ -92,21 +73,14 @@ def fetch_org_repos(session, org, max_repos=None):
     return repos
 
 def normalize_email_from_commit(commit_obj):
-    """
-    commit_obj is an item from commits list: it contains commit (with commit.author.email)
-    Prefer commit['commit']['author']['email'].
-    If missing: fallback to commit['author']['login'] + '@users.noreply.github.com' (surrogate).
-    """
     commit = commit_obj.get("commit") or {}
     author_info = commit.get("author") or {}
     email = author_info.get("email")
     if email:
         return email.lower()
-    # fallback: if commit_obj has 'author' (GitHub user), use login
     gh_author = commit_obj.get("author")
     if gh_author and gh_author.get("login"):
         return f"{gh_author['login']}@users.noreply.github.com".lower()
-    # ultimate fallback: use committer email if present
     committer = commit.get("committer") or {}
     email2 = committer.get("email")
     if email2:
@@ -122,7 +96,6 @@ def count_commits_for_repo(session, owner, repo_name, counter):
     params = {"per_page": 100}
     count = 0
     for commit in iter_pages(session, url, params=params):
-        # filter merge commits
         if is_merge_commit(commit):
             continue
         email = normalize_email_from_commit(commit)
@@ -130,7 +103,6 @@ def count_commits_for_repo(session, owner, repo_name, counter):
             counter[email] += 1
             count += 1
         else:
-            # optionally track unknowns
             counter["<unknown>"] += 1
             count += 1
     return count
@@ -170,8 +142,6 @@ def main():
             print(f"   commits counted (non-merge) in repo '{repo_name}': {c}  (cumulative {total_commits})")
         except Exception as e:
             print(f"[ERROR] Ошибка при обработке {repo_name}: {e}", file=sys.stderr)
-        # check rate limit from last response if available
-        # try to inspect rate limit via /rate_limit occasionally
         try:
             rl = session.get(f"{API_BASE}/rate_limit")
             if rl.status_code == 200:
@@ -191,7 +161,6 @@ def main():
     items = counter.most_common(200)
     top100 = items[:100]
 
-    # Save to CSV
     with open(args.out, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["rank", "email", "commits"])
@@ -199,7 +168,6 @@ def main():
             writer.writerow([i, email, cnt])
 
     print(f"[RESULT] Топ-{len(top100)} сохранён в {args.out}")
-    # Print to stdout
     for i, (email, cnt) in enumerate(top100, start=1):
         print(f"{i:3}. {email:40} {cnt}")
 
